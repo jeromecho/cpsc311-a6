@@ -268,31 +268,31 @@
 (check-equal? (lookup-env (extend-env empty-env 'a (numV 7)) 'a) (numV 7))
 (check-exn/311 (lookup-env (extend-env empty-env 'a (numV 7)) 'b) "Unbound")
 (check-equal? (lookup-env (extend-env (extend-env empty-env 'a (numV 7))
-                              'a (numV 8)) 'a)
-      (numV 8))
+                                      'a (numV 8)) 'a)
+              (numV 8))
 (check-equal? (lookup-env (extend-env (extend-env empty-env 'a (numV 7))
-                              'b (numV 8)) 'a)
-      (numV 7))
+                                      'b (numV 8)) 'a)
+              (numV 7))
 (check-equal? (lookup-env (extend-env (extend-env empty-env 'b (numV 8))
-                              'a (numV 7)) 'a)
-      (numV 7))
+                                      'a (numV 7)) 'a)
+              (numV 7))
 
 (check-equal? (lookup-env (extend-env
-                   (extend-env-fixFun
-                    (extend-env empty-env 'a (numV 3))
-                    'f 'a (id 'a))
-                   'a
-                   (numV 9))
-                  'f)
-      (funV 'a
-            (id 'a)
-            (extend-env-fixFun
-             (extend-env empty-env 'a (numV 3))
-             'f 'a (id 'a))))
+                           (extend-env-fixFun
+                            (extend-env empty-env 'a (numV 3))
+                            'f 'a (id 'a))
+                           'a
+                           (numV 9))
+                          'f)
+              (funV 'a
+                    (id 'a)
+                    (extend-env-fixFun
+                     (extend-env empty-env 'a (numV 3))
+                     'f 'a (id 'a))))
 
 (check-exn/311 (lookup-env (extend-env (extend-env empty-env 'b (numV 8))
-                                  'a (numV 7)) 'c)
-          "Unbound")
+                                       'a (numV 7)) 'c)
+               "Unbound")
 
 
 ;;
@@ -326,7 +326,7 @@
 (check-exn/311 (add/kra (numV 5) (funV 'x (id 'x) empty-env)) "Bad number")
 (check-exn/311 (add/kra (funV 'x (id 'x) empty-env) (numV 6)) "Bad number")
 (check-exn/311 (add/kra (funV 'x (id 'x) empty-env)
-                   (funV 'x (id 'x) empty-env)) "Bad number")
+                        (funV 'x (id 'x) empty-env)) "Bad number")
 
 
 
@@ -366,7 +366,6 @@
     (lookup-env env^ f)))
 
 
-
 ;; KID Env -> Value
 ;; produce the value associated with variable x in environment env
 (define (id/kra x env)
@@ -374,45 +373,70 @@
 
 
 
-;; Value Value -> Value
+;; Value Value (Value -> Value) -> Value
 ;; produce the result of applying v1 to v2
 ;; Effect: signal an error if v1 does not represent a function
 ;; Effect: signal an error in case of subsequent runtime error
-(define (apply/kra/k v1 v2)
+(define (apply/kra/k v1 v2 k)
   (type-case Value v1
     [funV (x body env)
-          (interp/kra-env/k body (extend-env env x v2))]
+          (interp/kra-env/k body (extend-env env x v2) k)]
     [else (error/311 'apply/kra/k "Bad function: ~a" v1)]))
 
 
 
-;; KRA Env -> Value
+;; KRA Env (Value -> Value) -> Value
 ;; produce the result of interpreting kra in environment env
 ;; Effect: signal an error in case of runtime type mismatch
-(define (interp/kra-env/k kra env)
+(define (interp/kra-env/k kra env k)
   (type-case KRA kra
-    [num (n) (numV n)]
+    [num (n) (k (numV n))]
     [add (l r)
-         (add/kra (interp/kra-env/k l env)
-                  (interp/kra-env/k r env))]
-    [nought? (e) (nought?/kra (interp/kra-env/k e env))]
-    [bool (b) (boolV b)]
+         (interp/kra-env/k
+          l env
+          (λ (vl)
+            (interp/kra-env/k
+             r env
+             (λ (vr)
+               (k (add/kra vl vr))))))]
+    [nought? (e)
+             (interp/kra-env/k
+              e env
+              (λ (ve)
+                (k (nought?/kra ve))))]
+    [bool (b)
+          (k (boolV b))]
     [ifB (p c a)
-         (if (value->bool (interp/kra-env/k p env))
-             (interp/kra-env/k c env)
-             (interp/kra-env/k a env))]
-    [id (x) (id/kra x env)]
-    [fixFun (f x body) (fixFun/kra f x body env)]
+         (interp/kra-env/k
+          p env
+          (λ (vp)
+            (if (value->bool vp)
+                (interp/kra-env/k
+                 c env
+                 (λ (vc)
+                   (k vc)))
+                (interp/kra-env/k
+                 a env
+                 (λ (va)
+                   (k va))))))]
+    [id (x)
+        (k (id/kra x env))]
+    [fixFun (f x body)
+            (k (fixFun/kra f x body env))]
     [app (rator rand)
-         (apply/kra/k (interp/kra-env/k rator env)
-                    (interp/kra-env/k rand env))]))
-
+         (interp/kra-env/k
+          rator env
+          (λ (vrator)
+            (interp/kra-env/k
+             rand env
+             (λ (vrand)
+               (apply/kra/k vrator vrand k)))))]))
 
 ;; KRA -> Value
 ;; interpret the given KRA expression
 ;; EFFECTS: Signals an error in case of runtime type error.
 (define (interp/kra/k kra)
-  (interp/kra-env/k kra empty-env)) ; stub for the examples
+  (interp/kra-env/k kra empty-env (λ (v) v))) ; stub for the examples
 
 
 (check-equal?
@@ -578,11 +602,11 @@
     pgm)))
 
 (check-equal? (interp-sexp '{with {f {fixFun x {y}
-                                     {ifB {nought? y}
-                                          0
-                                          {+ y {x {+ y -1}}}}}}
-                          {f 5}})
-      (numV 15))
+                                             {ifB {nought? y}
+                                                  0
+                                                  {+ y {x {+ y -1}}}}}}
+                                  {f 5}})
+              (numV 15))
 
 
 (check-equal? (interp-sexp '{ifB #t 7 9}) (numV 7))
@@ -590,19 +614,19 @@
 (check-exn/311 (interp-sexp '{ifB 7 #t 9}) "Bad Boolean")
 
 (check-equal? (interp-sexp
-       '{with {x #t}
-              {ifB x 7 9}})
-      (numV 7))
+               '{with {x #t}
+                      {ifB x 7 9}})
+              (numV 7))
 
 (check-exn/311 (interp-sexp
-           '{with {x 7}
-                  {ifB x #t 9}})
-          "Bad Boolean")
+                '{with {x 7}
+                       {ifB x #t 9}})
+               "Bad Boolean")
 
 (check-exn/311 (interp-sexp
-           '{with {a {fun {b} b}}
-                  {nought? a}})
-          "Bad number")
+                '{with {a {fun {b} b}}
+                       {nought? a}})
+               "Bad number")
 
 
 
@@ -626,38 +650,38 @@
     (read-from-file fname))))
 
 (check-equal? (with-temporary-data-file "{+ 3 7}\n"
-        (λ (fname) (interp-file fname)))
-      (numV 10))
+                (λ (fname) (interp-file fname)))
+              (numV 10))
 
 (check-equal? (with-temporary-data-file "{+ {+ 3 -4} 7}\n"
-        (λ (fname) (interp-file fname)))
-      (numV 6))
+                (λ (fname) (interp-file fname)))
+              (numV 6))
 
 (check-equal? (with-temporary-data-file "{with {x 5} {+ x {with {y 3} x}}}"
-        (λ (fname) (interp-file fname)))
-      (numV 10))
+                (λ (fname) (interp-file fname)))
+              (numV 10))
 
 
 (check-equal? (with-temporary-data-file
-          "{with {double {fun {x} {+ x x}}} {with {x 5} {double x}}}"
-        (λ (fname) (interp-file fname)))
-      (numV 10))
+                  "{with {double {fun {x} {+ x x}}} {with {x 5} {double x}}}"
+                (λ (fname) (interp-file fname)))
+              (numV 10))
 
 
 (check-equal? (with-temporary-data-file
-          "{with {* {fixFun mult {lhs} {fun {rhs}
+                  "{with {* {fixFun mult {lhs} {fun {rhs}
                                 {ifB {nought? rhs}
                                      0
                                      {+ lhs {{mult lhs} {+ rhs -1}}}}}}}
              {{* 20} 3}}"
-        (λ (fname) (interp-file fname)))
-      (numV 60))
+                (λ (fname) (interp-file fname)))
+              (numV 60))
 
 (check-equal? (with-temporary-data-file
-          "{with {* {fixFun mult {lhs} {fun {rhs}
+                  "{with {* {fixFun mult {lhs} {fun {rhs}
                                 {ifB {nought? rhs}
                                      0
                                      {+ lhs {{mult lhs} {+ rhs -1}}}}}}}
              {{* 20} 3}}"
-        (λ (fname) (interp-file fname)))
-      (numV 60))
+                (λ (fname) (interp-file fname)))
+              (numV 60))
