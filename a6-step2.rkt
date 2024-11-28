@@ -296,44 +296,57 @@
 
 ;; Defunctionalization
 
-(define (for-r/k vl k)
-  (λ (vr)
-    (k (add/kra vl vr))))
+(define-type Kont
+  [init/k]
+  [for-r/k (vl Value?) (k Kont?)]
+  [for-l/k (r KRA?) (env Env?) (k Kont?)] 
+  [for/nought (k Kont?)]
+  [for-after-pred/k (k Kont?)]
+  [for-pred/k (c KRA?) (a KRA?) (env Env?) (k Kont?)]
+  [for-rand/k (vrator Value?) (k Kont?)]
+  [for-rator/k (rand KRA?) (env Env?) (k Kont?)])
+;; interp. defunctionalized type variants for lambdas absracted away from
+;;         CPS-passing interpreter
+(define K0 (for-r/k (numV 3) (init/k)))
+(define K1 (for-pred/k (num 3) (num 4) empty-env
+                       (for-after-pred/k (init/k))))
+(define K2 (for-rator/k (fixFun 'f 'x (num 3))
+                        empty-env
+                        (for/nought (init/k))))
+(define K3 (for/nought
+               (for-pred/k
+                (num 1) (num 2) empty-env (init/k))))
 
-(define (for-l/k r env k)
-  (λ (vl)
-    (interp/kra-env/kd
-     r env
-     (for-r/k vl k))))
-
-(define (for/nought k)
-  (λ (ve)
-    (k (nought?/kra ve))))
-
-(define (for-after-pred/k k)
-  (λ (v)
-    (k v)))
-
-(define (for-pred/k c a env k)
-  (λ (vp)
-    (if (value->bool vp)
-        (interp/kra-env/kd
-         c env
-         (for-after-pred/k k))
-        (interp/kra-env/kd
-         a env
-         (for-after-pred/k k)))))
-
-(define (for-rand/k vrator k)
-  (λ (vrand)
-    (apply/kra/kd vrator vrand k)))
-
-(define (for/rator rand env k)
-  (λ (vrator)
-    (interp/kra-env/kd
-     rand env
-     (for-rand/k vrator k))))
-
+;; Kont Value -> Value
+;; apply given value to continuation  
+(define (apply/dk v k^)
+  (type-case Kont k^
+    [init/k ()
+            v]
+    [for-r/k (vl k)
+             (apply/dk (add/kra vl v) k)]
+    [for-l/k (r env k)
+             (interp/kra-env/kd
+              r env
+              (for-r/k v k))]
+    [for/nought (k)
+      (apply/dk (nought?/kra v) k)]
+    [for-after-pred/k (k)
+                      (apply/dk v k)]
+    [for-pred/k (c a env k)
+                (if (value->bool v)
+                    (interp/kra-env/kd
+                     c env
+                     (for-after-pred/k k))
+                    (interp/kra-env/kd
+                     a env
+                     (for-after-pred/k k)))]
+    [for-rand/k (vrator k)
+                (apply/kra/kd vrator v k)]
+    [for-rator/k (rand env k)
+                 (interp/kra-env/kd
+                  rand env
+                  (for-rand/k v k))]))
 
 ;;
 ;; Interpretation Functions
@@ -430,7 +443,8 @@
 ;; Effect: signal an error in case of runtime type mismatch
 (define (interp/kra-env/kd kra env k)
   (type-case KRA kra
-    [num (n) (k (numV n))]
+    [num (n)
+         (apply/dk (numV n) k)]
     [add (l r)
          (interp/kra-env/kd
           l env
@@ -440,28 +454,25 @@
               e env
               (for/nought k))]
     [bool (b)
-          (k (boolV b))]
+          (apply/dk (boolV b) k)]
     [ifB (p c a)
          (interp/kra-env/kd
           p env
           (for-pred/k c a env k))]
     [id (x)
-        (k (id/kra x env))]
+        (apply/dk (id/kra x env) k)]
     [fixFun (f x body)
-            (k (fixFun/kra f x body env))]
+            (apply/dk (fixFun/kra f x body env) k)]
     [app (rator rand)
          (interp/kra-env/kd
           rator env
-          (for/rator rand env k))]))
+          (for-rator/k rand env k))]))
 
 ;; KRA -> Value
 ;; interpret the given KRA expression
 ;; EFFECTS: Signals an error in case of runtime type error.
 (define (interp/kra/kd kra)
-  (interp/kra-env/kd kra empty-env (local [(define (init/k)
-                                             (λ (v) v))]
-                                     (init/k)))) ; stub for the examples
-
+  (interp/kra-env/kd kra empty-env (init/k))) ; stub for the examples
 
 (check-equal?
  (interp/kra/kd
