@@ -296,8 +296,8 @@
 
 ;; Trampolining
 (define-type trampoline
-  [bounce [p procedure?]]
-  [dismount [v (λ (x) #t)]])
+  [bounce [p Th?]]
+  [dismount [v Value?]])
 
 ;; (trampolineof Value) is one of:
 ;; - (bounce ( -> (trampolineof Value))
@@ -308,7 +308,7 @@
 ;; run the given trampoline to completion
 (define (mount-trampoline t)
   (type-case trampoline t
-    [bounce (p) (mount-trampoline (p))]
+    [bounce (th) (mount-trampoline (apply/th th))]
     [dismount (v) v]))
 
 ;; Defunctionalization
@@ -333,14 +333,23 @@
             (for-pred/k
              (num 1) (num 2) empty-env (init/k))))
 
-(define-type Th
+(define-type Th 
   [in-for-r-app/th (v Value?) (vl Value?) (k Kont?)]
-  []
-  []
-  []
-  []
-  []
-  [])
+  [in-for-l-app/th (r KRA?) (v Value?) (env Env?) (k Kont?)]
+  [in-for-nought-app/th (v Value?) (k Kont?)]
+  [in-for-after-pred-app/th (v Value?) (k Kont?)]
+  [in-for-pred-app/th (exp KRA?) (env Env?) (k Kont?)]
+  [in-for-rand/th (vrator Value?) (v Value?) (k Kont?)]
+  [in-for-rator/th (rand KRA?) (env Env?) (v Value?) (k Kont?)]
+  [in-num-interp/th (n number?) (k Kont?)]
+  [in-add-interp/th (l KRA?) (r KRA?) (env Env?) (k Kont?)]
+  [in-nought-interp/th (e KRA?) (env Env?) (k Kont?)]
+  [in-bool-interp/th (b boolean?) (k Kont?)]
+  [in-ifb-interp/th (p KRA?) (c KRA?) (a KRA?) (env Env?) (k Kont?)]
+  [in-id-interp/th (x kid?) (env Env?) (k Kont?)]
+  [in-fixfun-interp/th (f kid?) (x kid?) (body KRA?) (env Env?) (k Kont?)]
+  [in-app-interp/th (rator KRA?) (rand KRA?) (env Env?) (k Kont?)]
+  [in-funv-apply/th (body KRA?) (x kid?) (v2 Value?) (env Env?) (k Kont?)])
 ;; interp. defunctionalized type variants for thunks introduced to CPS-
 ;;         interpreter because of trampolining
 (define TH0 ...)
@@ -348,79 +357,57 @@
 (define TH2 ...)
 (define TH3 ...)
 
+
+;; Th -> (trampolineof Value)
+;; apply !!! 
 (define (apply/th th)
   (type-case Th th
     [in-for-r-app/th (v vl k)
                      (apply/dk (add/kra vl v) k)]
-    []
-    []
-    []
-    []
-    []
-    []
-    []
-    []
-    []
-    []))
-
-(define (in-for-r-app/th v vl k)
-  (λ () (apply/dk (add/kra vl v) k)))
-
-(define (in-for-l-app/th r env v k)
-  (λ () (interp/kra-env/kdt
-         r env
-         (for-r/k v k))))
-
-(define (in-for-nought-app/th v k)
-  (λ () (apply/dk (nought?/kra v) k)))
-
-(define (in-for-after-pred-app/th v k)
-  (λ () (apply/dk v k)))
-
-(define (in-for-pred-app/th exp env k)
-  (λ () (interp/kra-env/kdt
-         exp env
-         (for-after-pred/k k))))
-
-(define (in-for-rand/th vrator v k)
-  (λ () (apply/kra/kdt vrator v k)))
-
-(define (in-for-rator/th rand env v k)
-  (λ () (interp/kra-env/kdt
-         rand env
-         (for-rand/k v k))))
-
-(define (in-num-interp/th n k)
-  (λ () (apply/dk (numV n) k)))
-
-(define (in-add-interp/th l r env k)
-  (λ () (interp/kra-env/kdt
-                        l env
-                        (for-l/k r env k))))
-
-(define (in-nought-interp/th e env k)
-  (λ () (interp/kra-env/kdt
-                            e env
-                            (for-nought/k k))))
-
-(define (in-bool-interp/th b k)
-  (λ () (apply/dk (boolV b) k)))
-
-(define (in-ifb-interp/th p c a env k)
-  (λ () (interp/kra-env/kdt
-                        p env
-                        (for-pred/k c a env k))))
-
-(define (in-id-interp/th x env k)
-  (λ () (apply/dk (id/kra x env) k)))
-
-(define (in-fixfun-interp/th f x body env k)
-  (λ () (apply/dk (fixFun/kra f x body env) k)))
-
-(define (in-app-interp/th rator rand env k)
-  (λ () (interp/kra-env/kdt
-                        rator env
-                        (for-rator/k rand env k))))
+    [in-for-l-app/th (r v env k)
+                     (interp/kra-env/kdt
+                      r env
+                      (for-r/k v k))]
+    [in-for-nought-app/th (v k)
+                          (apply/dk (nought?/kra v) k)]
+    [in-for-after-pred-app/th (v k)
+                              (apply/dk v k)]
+    [in-for-pred-app/th (exp env k)
+                        (interp/kra-env/kdt
+                         exp env
+                         (for-after-pred/k k))]
+    [in-for-rand/th (vrator v k)
+                    (apply/kra/kdt vrator v k)]
+    [in-for-rator/th (rand env v k)
+                     (interp/kra-env/kdt
+                      rand env
+                      (for-rand/k v k))]
+    [in-num-interp/th (n k)
+                      (apply/dk (numV n) k)]
+    [in-add-interp/th (l r env k)
+                      (interp/kra-env/kdt
+                       l env
+                       (for-l/k r env k))]
+    [in-nought-interp/th (e env k)
+                         (interp/kra-env/kdt
+                          e env
+                          (for-nought/k k))]
+    [in-bool-interp/th (b k)
+                       (apply/dk (boolV b) k)]
+    [in-ifb-interp/th (p c a env k)
+                      (interp/kra-env/kdt
+                       p env
+                       (for-pred/k c a env k))]
+    [in-id-interp/th (x env k)
+                     (apply/dk (id/kra x env) k)]
+    [in-fixfun-interp/th (f x body env k)
+                         (apply/dk (fixFun/kra f x body env) k)]
+    [in-app-interp/th (rator rand env k)
+                      (interp/kra-env/kdt
+                       rator env
+                       (for-rator/k rand env k))]
+    [in-funv-apply/th (body x v2 env k)
+                      (interp/kra-env/kdt body (extend-env env x v2) k)]))
 
 
 
@@ -435,7 +422,7 @@
               (in-for-r-app/th v vl k))]
     [for-l/k (r env k)
              (bounce
-              (in-for-l-app/th r env v k))]
+              (in-for-l-app/th r v env k))]
     [for-nought/k (k)
                   (bounce
                    (in-for-nought-app/th v k))]
@@ -537,7 +524,7 @@
 (define (apply/kra/kdt v1 v2 k)
   (type-case Value v1
     [funV (x body env)
-          (bounce (λ () (interp/kra-env/kdt body (extend-env env x v2) k)))]
+          (bounce (in-funv-apply/th body x v2 env k))]
     [else (error/311 'apply/kra/kdt "Bad function: ~a" v1)]))
 
 
