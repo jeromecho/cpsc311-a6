@@ -316,7 +316,7 @@
   [init/k]
   [for-r/k (vl Value?) (k Kont?)]
   [for-l/k (r KRA?) (env Env?) (k Kont?)] 
-  [for/nought (k Kont?)]
+  [for-nought/k (k Kont?)]
   [for-after-pred/k (k Kont?)]
   [for-pred/k (c KRA?) (a KRA?) (env Env?) (k Kont?)]
   [for-rand/k (vrator Value?) (k Kont?)]
@@ -328,8 +328,8 @@
                        (for-after-pred/k (init/k))))
 (define K2 (for-rator/k (fixFun 'f 'x (num 3))
                         empty-env
-                        (for/nought (init/k))))
-(define K3 (for/nought
+                        (for-nought/k (init/k))))
+(define K3 (for-nought/k
                (for-pred/k
                 (num 1) (num 2) empty-env (init/k))))
 
@@ -347,7 +347,7 @@
               (λ () (interp/kra-env/kdt
                      r env
                      (for-r/k v k))))]
-    [for/nought (k)
+    [for-nought/k (k)
       (bounce
        (λ () (apply/dk (nought?/kra v) k)))]
     [for-after-pred/k (k)
@@ -473,7 +473,7 @@
     [nought? (e)
              (bounce (λ () (interp/kra-env/kdt
                             e env
-                            (for/nought k))))]
+                            (for-nought/k k))))]
     [bool (b)
           (bounce (λ () (apply/dk (boolV b) k)))]
     [ifB (p c a)

@@ -254,7 +254,7 @@
 (define (lookup-env env0 x0)
   (type-case Env env0
     [emptyE ()
-            (error/311 'interp/kra/kd "Unbound Identifier: ~a" x0)]
+            (error/311 'interp/kra/kdt "Unbound Identifier: ~a" x0)]
     [extend-env (env x v)
                 (if (symbol=? x x0)
                     v
@@ -294,8 +294,24 @@
                                        'a (numV 7)) 'c)
                "Unbound")
 
-;; Defunctionalization
+;; Trampolining
+(define-type trampoline
+  [bounce [p procedure?]]
+  [dismount [v (λ (x) #t)]])
 
+;; (trampolineof Value) is one of:
+;; - (bounce ( -> (trampolineof Value))
+;; - (dismount Value)
+;; interp.  A trampoline for KRA values 
+
+;; (trampolineof Value) -> Value 
+;; run the given trampoline to completion
+(define (mount-trampoline t)
+  (type-case trampoline t
+    [bounce (p) (mount-trampoline (p))]
+    [dismount (v) v]))
+
+;; Defunctionalization
 (define-type Kont
   [init/k]
   [for-r/k (vl Value?) (k Kont?)]
@@ -314,39 +330,130 @@
                         empty-env
                         (for-nought/k (init/k))))
 (define K3 (for-nought/k
-               (for-pred/k
-                (num 1) (num 2) empty-env (init/k))))
+            (for-pred/k
+             (num 1) (num 2) empty-env (init/k))))
 
-;; Kont Value -> Value
-;; apply given value to continuation  
+(define-type Th
+  [in-for-r-app/th (v Value?) (vl Value?) (k Kont?)]
+  []
+  []
+  []
+  []
+  []
+  [])
+;; interp. defunctionalized type variants for thunks introduced to CPS-
+;;         interpreter because of trampolining
+(define TH0 ...)
+(define TH1 ...)
+(define TH2 ...)
+(define TH3 ...)
+
+(define (apply/th th)
+  (type-case Th th
+    [in-for-r-app/th (v vl k)
+                     (apply/dk (add/kra vl v) k)]
+    []
+    []
+    []
+    []
+    []
+    []
+    []
+    []
+    []
+    []))
+
+(define (in-for-r-app/th v vl k)
+  (λ () (apply/dk (add/kra vl v) k)))
+
+(define (in-for-l-app/th r env v k)
+  (λ () (interp/kra-env/kdt
+         r env
+         (for-r/k v k))))
+
+(define (in-for-nought-app/th v k)
+  (λ () (apply/dk (nought?/kra v) k)))
+
+(define (in-for-after-pred-app/th v k)
+  (λ () (apply/dk v k)))
+
+(define (in-for-pred-app/th exp env k)
+  (λ () (interp/kra-env/kdt
+         exp env
+         (for-after-pred/k k))))
+
+(define (in-for-rand/th vrator v k)
+  (λ () (apply/kra/kdt vrator v k)))
+
+(define (in-for-rator/th rand env v k)
+  (λ () (interp/kra-env/kdt
+         rand env
+         (for-rand/k v k))))
+
+(define (in-num-interp/th n k)
+  (λ () (apply/dk (numV n) k)))
+
+(define (in-add-interp/th l r env k)
+  (λ () (interp/kra-env/kdt
+                        l env
+                        (for-l/k r env k))))
+
+(define (in-nought-interp/th e env k)
+  (λ () (interp/kra-env/kdt
+                            e env
+                            (for-nought/k k))))
+
+(define (in-bool-interp/th b k)
+  (λ () (apply/dk (boolV b) k)))
+
+(define (in-ifb-interp/th p c a env k)
+  (λ () (interp/kra-env/kdt
+                        p env
+                        (for-pred/k c a env k))))
+
+(define (in-id-interp/th x env k)
+  (λ () (apply/dk (id/kra x env) k)))
+
+(define (in-fixfun-interp/th f x body env k)
+  (λ () (apply/dk (fixFun/kra f x body env) k)))
+
+(define (in-app-interp/th rator rand env k)
+  (λ () (interp/kra-env/kdt
+                        rator env
+                        (for-rator/k rand env k))))
+
+
+
+;; Kont Value -> (trampolineof Value)
+;; apply value to continuation to produce trampoline of required computation 
 (define (apply/dk v k^)
   (type-case Kont k^
     [init/k ()
-            v]
+            (dismount v)]
     [for-r/k (vl k)
-             (apply/dk (add/kra vl v) k)]
+             (bounce
+              (in-for-r-app/th v vl k))]
     [for-l/k (r env k)
-             (interp/kra-env/kd
-              r env
-              (for-r/k v k))]
+             (bounce
+              (in-for-l-app/th r env v k))]
     [for-nought/k (k)
-      (apply/dk (nought?/kra v) k)]
+                  (bounce
+                   (in-for-nought-app/th v k))]
     [for-after-pred/k (k)
-                      (apply/dk v k)]
+                      (bounce
+                       (in-for-after-pred-app/th v k))]
     [for-pred/k (c a env k)
                 (if (value->bool v)
-                    (interp/kra-env/kd
-                     c env
-                     (for-after-pred/k k))
-                    (interp/kra-env/kd
-                     a env
-                     (for-after-pred/k k)))]
+                    (bounce
+                     (in-for-pred-app/th c env k))
+                    (bounce
+                     (in-for-pred-app/th a env k)))]
     [for-rand/k (vrator k)
-                (apply/kra/kd vrator v k)]
+                (bounce
+                 (in-for-rand/th vrator v k))]
     [for-rator/k (rand env k)
-                 (interp/kra-env/kd
-                  rand env
-                  (for-rand/k v k))]))
+                 (bounce
+                  (in-for-rator/th rand env v k))]))
 
 ;;
 ;; Interpretation Functions
@@ -366,7 +473,6 @@
 (check-exn/311 (value->num (funV 'x (id 'x) empty-env)) "Bad number")
 
 
-
 ;; Value Value -> Value
 ;; produce the sum of two numbers
 ;; Effect: signal an error if either argument does not represent a number
@@ -382,7 +488,6 @@
                         (funV 'x (id 'x) empty-env)) "Bad number")
 
 
-
 ;; Value -> Boolean
 ;; produce the boolean represented by the given value
 ;; Effect: signal an error if the value does not represent a boolean
@@ -394,7 +499,6 @@
 (check-equal? (value->bool (boolV #t)) #t)
 (check-equal? (value->bool (boolV #f)) #f)
 (check-exn/311 (value->bool (funV 'x (id 'x) empty-env)) "Bad Boolean")
-
 
 
 ;; Value -> Value
@@ -426,56 +530,50 @@
 
 
 
-;; Value Value (Value -> Value) -> Value
+;; Value Value (Value -> Value) -> (trampolineof Value)
 ;; produce the result of applying v1 to v2
 ;; Effect: signal an error if v1 does not represent a function
 ;; Effect: signal an error in case of subsequent runtime error
-(define (apply/kra/kd v1 v2 k)
+(define (apply/kra/kdt v1 v2 k)
   (type-case Value v1
     [funV (x body env)
-          (interp/kra-env/kd body (extend-env env x v2) k)]
-    [else (error/311 'apply/kra/kd "Bad function: ~a" v1)]))
+          (bounce (λ () (interp/kra-env/kdt body (extend-env env x v2) k)))]
+    [else (error/311 'apply/kra/kdt "Bad function: ~a" v1)]))
 
 
 
-;; KRA Env (Value -> Value) -> Value
+;; KRA Env (Value -> Value) -> (trampolineof Value)
 ;; produce the result of interpreting kra in environment env
 ;; Effect: signal an error in case of runtime type mismatch
-(define (interp/kra-env/kd kra env k)
+(define (interp/kra-env/kdt kra env k)
   (type-case KRA kra
     [num (n)
-         (apply/dk (numV n) k)]
+         (bounce (in-num-interp/th n k))]
     [add (l r)
-         (interp/kra-env/kd
-          l env
-          (for-l/k r env k))]
+         (bounce (in-add-interp/th l r env k))]
     [nought? (e)
-             (interp/kra-env/kd
-              e env
-              (for-nought/k k))]
+             (bounce (in-nought-interp/th e env k))]
     [bool (b)
-          (apply/dk (boolV b) k)]
+          (bounce (in-bool-interp/th b k))]
     [ifB (p c a)
-         (interp/kra-env/kd
-          p env
-          (for-pred/k c a env k))]
+         (bounce (in-ifb-interp/th p c a env k))]
     [id (x)
-        (apply/dk (id/kra x env) k)]
+        (bounce (in-id-interp/th x env k))]
     [fixFun (f x body)
-            (apply/dk (fixFun/kra f x body env) k)]
+            (bounce
+             (in-fixfun-interp/th f x body env k))]
     [app (rator rand)
-         (interp/kra-env/kd
-          rator env
-          (for-rator/k rand env k))]))
+         (bounce (in-app-interp/th rator rand env k))]))
 
 ;; KRA -> Value
 ;; interpret the given KRA expression
 ;; EFFECTS: Signals an error in case of runtime type error.
-(define (interp/kra/kd kra)
-  (interp/kra-env/kd kra empty-env (init/k))) ; stub for the examples
+(define (interp/kra/kdt kra)
+  (mount-trampoline
+   (interp/kra-env/kdt kra empty-env (init/k)))) ; stub for the examples
 
 (check-equal?
- (interp/kra/kd
+ (interp/kra/kdt
   (with '* (fixFun 'mult 'lhs
                    (fun 'rhs
                         (ifB  (nought? (id 'rhs))
@@ -632,7 +730,7 @@
 ;; produce the result of interpreting the KRAken program in input
 ;; EFFECT: signals an error if interpretation signals a runtime error.
 (define (interp-sexp pgm)
-  (interp/kra/kd
+  (interp/kra/kdt
    (parse/kra
     pgm)))
 
@@ -670,7 +768,7 @@
 ;; produce the result of interpreting the KRAken program in input
 ;; Effect: signals an error if interpretation signals a runtime error.
 (define (interp-string pgm)
-  (interp/kra/kd
+  (interp/kra/kdt
    (parse/kra
     (read-from-string pgm))))
 
@@ -680,7 +778,7 @@
 ;; Effect: signals an error if no file fname contains a KRAken representation
 ;; Effect: signals an error if interpretation signals a runtime error.
 (define (interp-file fname)
-  (interp/kra/kd
+  (interp/kra/kdt
    (parse/kra
     (read-from-file fname))))
 
